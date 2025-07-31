@@ -49,7 +49,7 @@ import {
   USE_STREAMING_RPCS_FOR_BACKFILL,
   SUBSCRIBE_RPC_TIMEOUT,
 } from "./env";
-import * as process from "node:process";
+import process from "node:process";
 import url from "node:url";
 import { ok, Result } from "neverthrow";
 import { getQueue, getWorker } from "./worker";
@@ -97,19 +97,21 @@ export class SnapchainShuttleApp implements MessageHandler {
     const eventStreamForRead = new EventStreamConnection(redis.client);
     const shardKey = totalShards === 0 ? "all" : `shard-${shardIndex}`;
     
+    // Fixed constructor call - matches the actual API
     const hubSubscriber = new EventStreamHubSubscriber(
-      hubId,
-      hub,
-      shardIndex,
-      eventStreamForWrite,
-      redis,
-      shardKey,
-      log,
-      undefined, // all event types
-      SUBSCRIBE_RPC_TIMEOUT,
+      hubId,                    // label: string
+      hub,                      // hubClient: HubClient
+      shardIndex,               // shardIndex: number
+      eventStreamForWrite,      // eventStream: EventStreamConnection
+      redis,                    // redis: RedisClient
+      shardKey,                 // shardKey: string
+      log,                      // log: Logger
+      undefined,                // eventTypes?: HubEventType[] (undefined = all event types)
+      SUBSCRIBE_RPC_TIMEOUT,    // connectionTimeout?: number
     );
+    
     const streamConsumer = new HubEventStreamConsumer(hub, eventStreamForRead, shardKey);
-
+  
     return new SnapchainShuttleApp(db, dbSchema, redis, hubSubscriber, streamConsumer);
   }
 
