@@ -95,19 +95,19 @@ export class SnapchainShuttleApp implements MessageHandler {
     const redis = RedisClient.create(redisUrl);
     const eventStreamForWrite = new EventStreamConnection(redis.client);
     const eventStreamForRead = new EventStreamConnection(redis.client);
-    const shardKey = totalShards === 0 ? "all" : `shard-${shardIndex}`;
+    const shardKey = totalShards === 0 ? "all" : `${shardIndex}`;
     
     // Fixed constructor call - matches the actual API
     const hubSubscriber = new EventStreamHubSubscriber(
-      hubId,                    // label: string
-      hub,                      // hubClient: HubClient
-      shardIndex,               // shardIndex: number
-      eventStreamForWrite,      // eventStream: EventStreamConnection
-      redis,                    // redis: RedisClient
-      shardKey,                 // shardKey: string
-      log,                      // log: Logger
-      undefined,                // eventTypes?: HubEventType[] (undefined = all event types)
-      SUBSCRIBE_RPC_TIMEOUT,    // connectionTimeout?: number
+      hubId,                    // label
+      hub,                      // hubClient (the full HubClient object)
+      shardIndex,               // shardIndex  
+      eventStreamForWrite,      // eventStream
+      redis,                    // redis
+      shardKey,                 // shardKey
+      log,                      // log
+      undefined,                // eventTypes (undefined = all types)
+      SUBSCRIBE_RPC_TIMEOUT,    // connectionTimeout
     );
     
     const streamConsumer = new HubEventStreamConsumer(hub, eventStreamForRead, shardKey);

@@ -25,7 +25,7 @@ export const MAX_FID = process.env["MAX_FID"];
 // Performance tuning
 export const CONCURRENCY = parseInt(process.env["CONCURRENCY"] || "4");
 export const USE_STREAMING_RPCS_FOR_BACKFILL = process.env["USE_STREAMING_RPCS_FOR_BACKFILL"] === "true" ? true : false;
-export const SUBSCRIBE_RPC_TIMEOUT = parseInt(process.env["SUBSCRIBE_RPC_TIMEOUT"] || "30000");
+export const SUBSCRIBE_RPC_TIMEOUT = parseInt(process.env["SUBSCRIBE_RPC_TIMEOUT"] || "300000");
 
 // Monitoring
 export const STATSD_HOST = process.env["STATSD_HOST"] || "localhost:8125";
