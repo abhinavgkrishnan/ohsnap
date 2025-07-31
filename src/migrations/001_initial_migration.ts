@@ -1,9 +1,8 @@
-// src/migrations/001_initial_migration.ts
 import { Kysely, sql } from "kysely";
 
 // biome-ignore lint/suspicious/noExplicitAny: migration function needs any
 export const up = async (db: Kysely<any>) => {
-  // Create extension for ULID generation
+  // Used for generating random bytes in ULID creation
   await sql`CREATE EXTENSION IF NOT EXISTS pgcrypto`.execute(db);
 
   // ULID generation function
@@ -12,7 +11,7 @@ export const up = async (db: Kysely<any>) => {
     RETURN ((lpad(to_hex((floor((EXTRACT(epoch FROM clock_timestamp()) * (1000)::numeric)))::bigint), 12, '0'::text) || encode(public.gen_random_bytes(10), 'hex'::text)))::uuid;
   `.execute(db);
 
-  // MESSAGES table (core Farcaster messages)
+  // MESSAGES -------------------------------------------------------------------------------------
   await db.schema
     .createTable("messages")
     .addColumn("id", "uuid", (col) => col.defaultTo(sql`generate_ulid()`))
@@ -31,12 +30,19 @@ export const up = async (db: Kysely<any>) => {
     .addColumn("body", "json", (col) => col.notNull())
     .addColumn("raw", "bytea", (col) => col.notNull())
     .addUniqueConstraint("messages_hash_unique", ["hash"])
-    .addPrimaryKeyConstraint("messages_pkey", ["id"])
+    .addUniqueConstraint("messages_hash_fid_type_unique", ["hash", "fid", "type"])
+    // .addForeignKeyConstraint("messages_fid_foreign", ["fid"], "fids", ["fid"], (cb) => cb.onDelete("cascade"))
+    // .addForeignKeyConstraint("messages_signer_fid_foreign", ["fid", "signer"], "signers", ["fid", "key"], (cb) =>
+    //   cb.onDelete("cascade"),
+    // )
+    .$call((qb) =>
+      qb.addPrimaryKeyConstraint("messages_pkey", ["id"]).addUniqueConstraint("messages_hash_unique", ["hash"]),
+    )
     .execute();
 
-  // Indexes for messages table
   await db.schema.createIndex("messages_timestamp_index").on("messages").columns(["timestamp"]).execute();
+
   await db.schema.createIndex("messages_fid_index").on("messages").columns(["fid"]).execute();
-  await db.schema.createIndex("messages_type_index").on("messages").columns(["type"]).execute();
+
   await db.schema.createIndex("messages_signer_index").on("messages").columns(["signer"]).execute();
 };
