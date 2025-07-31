@@ -6,7 +6,7 @@ export const COLORIZE =
 export const LOG_LEVEL = process.env["LOG_LEVEL"] || "info";
 
 // Your Snapchain configuration
-export const HUB_HOST = process.env["HUB_HOST"] || "localhost:3381";
+export const HUB_HOST = process.env["HUB_HOST"] || "localhost:3383";
 export const HUB_SSL = process.env["HUB_SSL"] === "true" ? true : false;
 
 // Database configuration
