@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: 'postgres:16-alpine'
+    restart: unless-stopped
+    ports:
+      - '6541:5432' # Use a port unlikely to be in use
+    environment:
+      - POSTGRES_DB=shuttle
+      - POSTGRES_USER=shuttle
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ 'CMD-SHELL', 'env', 'pg_isready', '--dbname', '$$POSTGRES_DB', '-U', '$$POSTGRES_USER' ]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+    networks:
+      - shuttle-network
+
+  redis:
+    image: 'redis:7.2-alpine'
+    restart: unless-stopped
+    command: --save 1 1 --loglevel warning --maxmemory-policy noeviction
+    volumes:
+      - redis-data:/data
+    ports:
+      - '16379:6379'
+    healthcheck:
+      test: [ 'CMD-SHELL', 'redis-cli', 'ping' ]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - shuttle-network
+
+  # Optional: Add Grafana for monitoring your snapchain
+  grafana:
+    image: 'grafana/grafana:10.0.3'
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - shuttle-network
+
+volumes:
+  postgres-data:
+  redis-data:
+  grafana-data:
+
+networks:
+  shuttle-network:

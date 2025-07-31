@@ -1,6 +1,7 @@
 // src/migrations/002_custom_tables.ts
 import { Kysely, sql } from "kysely";
 
+// biome-ignore lint/suspicious/noExplicitAny: migration function needs any
 export const up = async (db: Kysely<any>) => {
   // CASTS table - materialized view of cast messages
   await db.schema
@@ -88,23 +89,23 @@ export const up = async (db: Kysely<any>) => {
   // Performance indexes
   await db.schema.createIndex("casts_fid_timestamp_index")
     .on("casts").columns(["fid", "timestamp"])
-    .where(sql.ref("deleted_at"), "is", null).execute();
+    .where(sql.ref("deletedAt"), "is", null).execute();
     
   await db.schema.createIndex("casts_parent_index")
     .on("casts").columns(["parentFid", "parentHash"])
-    .where(sql.ref("deleted_at"), "is", null).execute();
+    .where(sql.ref("deletedAt"), "is", null).execute();
 
   await db.schema.createIndex("reactions_fid_timestamp_index")
     .on("reactions").columns(["fid", "timestamp"])
-    .where(sql.ref("deleted_at"), "is", null).execute();
+    .where(sql.ref("deletedAt"), "is", null).execute();
     
   await db.schema.createIndex("reactions_target_index")
     .on("reactions").columns(["targetFid", "targetHash"])
-    .where(sql.ref("deleted_at"), "is", null).execute();
+    .where(sql.ref("deletedAt"), "is", null).execute();
 
   await db.schema.createIndex("links_fid_target_index")
     .on("links").columns(["fid", "targetFid", "type"])
-    .where(sql.ref("deleted_at"), "is", null).execute();
+    .where(sql.ref("deletedAt"), "is", null).execute();
 
   await db.schema.createIndex("onchain_events_block_log_index")
     .on("onchain_events").columns(["blockNumber", "logIndex"]).execute();

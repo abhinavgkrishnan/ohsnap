@@ -19,7 +19,6 @@ import {
   getStorageUnitExpiry,
   getStorageUnitType,
   HubEvent,
-  HubInfoRequest,
   isCastAddMessage,
   isCastRemoveMessage,
   isReactionAddMessage,
@@ -60,7 +59,7 @@ import { bytesToHex, farcasterTimeToDate } from "./utils";
 const hubId = "my-snapchain-shuttle";
 
 export class SnapchainShuttleApp implements MessageHandler {
-  private readonly db: DB;
+  private readonly db: CustomDb;
   private readonly dbSchema: string;
   private hubSubscriber: HubSubscriber;
   private streamConsumer: HubEventStreamConsumer;
@@ -68,7 +67,7 @@ export class SnapchainShuttleApp implements MessageHandler {
   private readonly hubId;
 
   constructor(
-    db: DB,
+    db: CustomDb,
     dbSchema: string,
     redis: RedisClient,
     hubSubscriber: HubSubscriber,
@@ -91,7 +90,7 @@ export class SnapchainShuttleApp implements MessageHandler {
     shardIndex: number,
     hubSSL = false,
   ) {
-    const db = getDbClient(dbUrl, dbSchema);
+    const db = getDbClient(dbUrl, dbSchema) as CustomDb;
     const hub = getHubClient(hubUrl, { ssl: hubSSL });
     const redis = RedisClient.create(redisUrl);
     const eventStreamForWrite = new EventStreamConnection(redis.client);
@@ -101,13 +100,12 @@ export class SnapchainShuttleApp implements MessageHandler {
     const hubSubscriber = new EventStreamHubSubscriber(
       hubId,
       hub,
+      shardIndex,
       eventStreamForWrite,
       redis,
       shardKey,
       log,
-      null, // all event types
-      totalShards,
-      shardIndex,
+      undefined, // all event types
       SUBSCRIBE_RPC_TIMEOUT,
     );
     const streamConsumer = new HubEventStreamConsumer(hub, eventStreamForRead, shardKey);
@@ -129,7 +127,7 @@ export class SnapchainShuttleApp implements MessageHandler {
           to: bytesToHex(onChainEvent.idRegisterEventBody.to),
           recoveryAddress: bytesToHex(onChainEvent.idRegisterEventBody.recoveryAddress),
         };
-        log.info(`📝 FID Registration: ${onChainEvent.fid} - ${body.eventType}`);
+        log.info(`📝 FID Registration: ${onChainEvent.fid} - ${JSON.stringify(body)}`);
       } else if (isSignerOnChainEvent(onChainEvent)) {
         body = {
           eventType: onChainEvent.signerEventBody.eventType,
@@ -138,7 +136,7 @@ export class SnapchainShuttleApp implements MessageHandler {
           metadata: bytesToHex(onChainEvent.signerEventBody.metadata),
           metadataType: onChainEvent.signerEventBody.metadataType,
         };
-        log.info(`🔑 Signer Event: FID ${onChainEvent.fid} - ${body.eventType}`);
+        log.info(`🔑 Signer Event: FID ${onChainEvent.fid} - ${JSON.stringify(body)}`);
       } else if (isStorageRentOnChainEvent(onChainEvent)) {
         body = {
           eventType: getStorageUnitType(onChainEvent),
@@ -146,7 +144,7 @@ export class SnapchainShuttleApp implements MessageHandler {
           units: onChainEvent.storageRentEventBody.units,
           payer: bytesToHex(onChainEvent.storageRentEventBody.payer),
         };
-        log.info(`💾 Storage Rent: FID ${onChainEvent.fid} - ${body.units} units`);
+        log.info(`💾 Storage Rent: FID ${onChainEvent.fid} - ${onChainEvent.storageRentEventBody.units} units`);
       }
       
       try {
@@ -181,6 +179,11 @@ export class SnapchainShuttleApp implements MessageHandler {
   ): Promise<void> {
     if (!isNew) {
       // Message was already processed, skip
+      return;
+    }
+
+    if (!message.data) {
+      log.warn("Message data is undefined, skipping");
       return;
     }
 
@@ -288,7 +291,7 @@ export class SnapchainShuttleApp implements MessageHandler {
           operation: operation,
           state: state,
           timestamp: farcasterTimeToDate(message.data.timestamp) || new Date(),
-          blockNumber: message.data.timestamp, // Using Farcaster timestamp as block reference
+          blockNumber: Number(message.data.timestamp), // Using Farcaster timestamp as block reference
           wasMissed: wasMissed,
         })
         .execute();
@@ -322,10 +325,9 @@ export class SnapchainShuttleApp implements MessageHandler {
     log.info(`🔍 Starting reconciliation for ${fids.length} FIDs...`);
     const reconciler = new MessageReconciliation(
       this.hubSubscriber.hubClient!,
-      this.db,
+      this.db as DB,
       log,
-      undefined,
-      USE_STREAMING_RPCS_FOR_BACKFILL,
+      undefined, // connectionTimeout
     );
     
     for (const fid of fids) {
@@ -334,7 +336,7 @@ export class SnapchainShuttleApp implements MessageHandler {
         fid,
         async (message, missingInDb, prunedInDb, revokedInDb) => {
           if (missingInDb) {
-            await HubEventProcessor.handleMissingMessage(this.db, message, this);
+            await HubEventProcessor.handleMissingMessage(this.db as DB, message, this);
             log.debug(`📥 Backfilled missing message for FID ${fid}`);
           } else if (prunedInDb || revokedInDb) {
             const messageDesc = prunedInDb ? "pruned" : revokedInDb ? "revoked" : "existing";
@@ -357,15 +359,17 @@ export class SnapchainShuttleApp implements MessageHandler {
     if (fids.length === 0) {
       let maxFid = MAX_FID ? parseInt(MAX_FID) : undefined;
       if (!maxFid) {
-        const getInfoResult = await this.hubSubscriber.hubClient?.getInfo(HubInfoRequest.create({}));
+        // Get info from hub to determine max FID
+        const getInfoResult = await this.hubSubscriber.hubClient?.getInfo({});
         if (getInfoResult?.isErr()) {
-          log.error("❌ Failed to get max FID", getInfoResult.error);
+          log.error("❌ Failed to get hub info", getInfoResult.error);
           throw getInfoResult.error;
         } else {
-          maxFid = getInfoResult?._unsafeUnwrap()?.dbStats?.numFidEvents;
+          // Try to get from dbStats, fallback to a reasonable default
+          maxFid = getInfoResult?._unsafeUnwrap()?.dbStats?.numMessages || 100000;
           if (!maxFid) {
-            log.error("❌ Failed to get max FID");
-            throw new Error("Failed to get max FID");
+            log.error("❌ Failed to get max FID, using default");
+            maxFid = 100000;
           }
         }
       }
@@ -389,12 +393,12 @@ export class SnapchainShuttleApp implements MessageHandler {
   }
 
   private async processHubEvent(hubEvent: HubEvent) {
-    await HubEventProcessor.processHubEvent(this.db, hubEvent, this);
+    await HubEventProcessor.processHubEvent(this.db as DB, hubEvent, this);
   }
 
   async ensureMigrations() {
     log.info("🔄 Running database migrations...");
-    const result = await migrateToLatest(this.db, this.dbSchema, log);
+    const result = await migrateToLatest(this.db as DB, this.dbSchema, log);
     if (result.isErr()) {
       log.error("❌ Failed to migrate database", result.error);
       throw result.error;

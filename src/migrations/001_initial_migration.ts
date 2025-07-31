@@ -1,6 +1,7 @@
 // src/migrations/001_initial_migration.ts
 import { Kysely, sql } from "kysely";
 
+// biome-ignore lint/suspicious/noExplicitAny: migration function needs any
 export const up = async (db: Kysely<any>) => {
   // Create extension for ULID generation
   await sql`CREATE EXTENSION IF NOT EXISTS pgcrypto`.execute(db);
