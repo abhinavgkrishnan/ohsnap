@@ -55,7 +55,8 @@ import { ok, Result } from "neverthrow";
 import { getQueue, getWorker } from "./worker";
 import { Queue } from "bullmq";
 import { bytesToHex, farcasterTimeToDate } from "./utils";
- 
+
+
 
 const hubId = "my-snapchain-shuttle";
 
@@ -284,21 +285,29 @@ export class SnapchainShuttleApp implements MessageHandler {
 
     // Keep message stats for analytics
     if (isNew) {
-      const t0 = Date.now();
+      if (!message.data) {
+        log.warn("Message data is undefined, skipping message_stats insert");
+        return;
+      }
+
+      const messageData = message.data;
+      const timestamp = farcasterTimeToDate(messageData.timestamp) || new Date();
+      const blockNumber = Number(messageData.timestamp);
+
+      // Execute the INSERT (condensed logging per FID, not per message)
       await customDB
         .insertInto("message_stats")
         .values({
-          messageType: message.data.type,
-          fid: message.data.fid,
+          messageType: messageData.type,
+          fid: messageData.fid,
           operation: operation,
           state: state,
-          timestamp: farcasterTimeToDate(message.data.timestamp) || new Date(),
-          blockNumber: Number(message.data.timestamp),
+          timestamp: timestamp,
+          blockNumber: blockNumber,
           wasMissed: wasMissed,
         })
         .execute();
-      const durMs = Date.now() - t0;
-      log.trace({ event: "db_exec", table: "message_stats", sql_kind: "insert", dur_ms: durMs, t_since_proc_start_ms: sinceProcessStartMs(), t_since_proc_start_min: sinceProcessStartMin() }, "Inserted message_stats row");
+      // Note: Individual INSERT timing moved to FID-level summary
     }
 
     const hashStr = bytesToHexString(message.hash)._unsafeUnwrap();
@@ -349,10 +358,17 @@ export class SnapchainShuttleApp implements MessageHandler {
           try { bytesInTotal += JSON.stringify(message).length; } catch {}
           if (missingInDb) {
             const dbT0 = Date.now();
+            
+            // Log detailed performance for missing message handling
+            const messageHashStr = bytesToHexString(message.hash)._unsafeUnwrap();
+            
             await HubEventProcessor.handleMissingMessage(this.db as DB, message, this);
-            dbMsTotal += Date.now() - dbT0;
+            
+            const dbDur = Date.now() - dbT0;
+            dbMsTotal += dbDur;
             messagesProcessed++;
-            fidLog.trace({ event: "message_backfilled" }, `Backfilled missing message`);
+            
+            // Individual message processing moved to FID-level summary logging
           } else if (prunedInDb || revokedInDb) {
             const messageDesc = prunedInDb ? "pruned" : revokedInDb ? "revoked" : "existing";
             fidLog.trace({ event: "message_reconciled", message_desc: messageDesc }, `Reconciled ${messageDesc} message`);
@@ -367,6 +383,9 @@ export class SnapchainShuttleApp implements MessageHandler {
       const grpcMsTotal = Date.now() - grpcStart - dbMsTotal; // Total time minus DB operations
       
       const elapsedMs = Date.now() - fidStart;
+      const avgDbMsPerMessage = messagesProcessed > 0 ? (dbMsTotal / messagesProcessed).toFixed(1) : 0;
+      const avgBytesPerMessage = messagesProcessed > 0 ? Math.round(bytesInTotal / messagesProcessed) : 0;
+      
       fidLog.info({
         event: "fid_done",
         dur_ms: elapsedMs,
@@ -375,9 +394,12 @@ export class SnapchainShuttleApp implements MessageHandler {
         messages_found: messagesFound,
         messages_processed: messagesProcessed,
         bytes_in: bytesInTotal,
+        avg_db_ms_per_message: avgDbMsPerMessage,
+        avg_bytes_per_message: avgBytesPerMessage,
+        db_efficiency_pct: elapsedMs > 0 ? ((dbMsTotal / elapsedMs) * 100).toFixed(1) : 0,
         t_since_proc_start_ms: sinceProcessStartMs(),
         t_since_proc_start_min: sinceProcessStartMin(),
-      }, `Reconciled FID ${fid} in ${(elapsedMs / 1000).toFixed(2)}s`);
+      }, `Reconciled FID ${fid}: ${messagesProcessed} messages in ${(elapsedMs / 1000).toFixed(2)}s (${avgDbMsPerMessage}ms/msg avg)`);
     }
   }
 
