@@ -116,6 +116,20 @@ export type MessageStatsRow = {
   wasMissed: boolean;
 };
 
+export type BackfillProgressRow = {
+  id: Generated<string>;
+  createdAt: Generated<Date>;
+  updatedAt: Generated<Date>;
+  batchId: string;
+  fid: Fid;
+  status: string; // "pending", "completed", "failed"
+  startedAt: Date | null;
+  completedAt: Date | null;
+  error: string | null;
+  messagesProcessed: number;
+  processingTimeSeconds: number | null;
+};
+
 // Extended interface that includes your custom tables
 export interface Tables extends HubTables {
   casts: CastRow;
@@ -123,6 +137,7 @@ export interface Tables extends HubTables {
   links: LinkRow;
   onchain_events: OnChainEventRow;
   message_stats: MessageStatsRow;
+  backfill_progress: BackfillProgressRow;
 }
 
 export type CustomDb = Kysely<Tables>;

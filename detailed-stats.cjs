@@ -6,6 +6,19 @@ async function getDetailedStats() {
     connectionString: 'postgres://shuttle:password@localhost:6541/shuttle'
   });
   
+  // Message type names mapping
+  const typeNames = {
+    1: 'CAST_ADD',
+    2: 'CAST_REMOVE', 
+    3: 'REACTION_ADD',
+    4: 'REACTION_REMOVE',
+    5: 'LINK_ADD',
+    6: 'LINK_REMOVE',
+    7: 'VERIFICATION_ADD_ETH_ADDRESS',
+    8: 'VERIFICATION_REMOVE',
+    11: 'USER_DATA_ADD'
+  };
+  
   try {
     await client.connect();
     
@@ -14,7 +27,36 @@ async function getDetailedStats() {
     console.log(`📅 ${new Date().toISOString()}`);
     console.log('');
     
-    // Message type distribution
+    // Total progress summary
+    console.log('🎯 OVERALL PROGRESS:');
+    const totalMessages = await client.query('SELECT COUNT(*) as total FROM messages;');
+    const totalCasts = await client.query('SELECT COUNT(*) as total FROM casts WHERE deleted_at IS NULL;');
+    const totalReactions = await client.query('SELECT COUNT(*) as total FROM reactions WHERE deleted_at IS NULL;');
+    const totalLinks = await client.query('SELECT COUNT(*) as total FROM links WHERE deleted_at IS NULL;');
+    
+    console.log(`  Total Messages Processed: ${parseInt(totalMessages.rows[0].total).toLocaleString()}`);
+    console.log(`  Active Casts: ${parseInt(totalCasts.rows[0].total).toLocaleString()}`);
+    console.log(`  Active Reactions: ${parseInt(totalReactions.rows[0].total).toLocaleString()}`);
+    console.log(`  Active Links: ${parseInt(totalLinks.rows[0].total).toLocaleString()}`);
+    
+    // Quick performance check - messages in last 5 minutes
+    const recentActivity = await client.query(`
+      SELECT COUNT(*) as recent_count 
+      FROM messages 
+      WHERE timestamp > NOW() - INTERVAL '5 minutes';
+    `);
+    const recentCount = parseInt(recentActivity.rows[0].recent_count);
+    const ratePerSecond = Math.round(recentCount / 300); // 5 minutes = 300 seconds
+    
+    if (recentCount > 0) {
+      console.log(`  🔥 Recent Activity: ${recentCount} messages in last 5 minutes (${ratePerSecond} msg/sec)`);
+    } else {
+      console.log(`  ⏸️  No recent activity (may be processing older messages)`);
+    }
+    
+    console.log('');
+    
+    // Message type distribution - fix the time filter since we might not have messages from last hour
     console.log('📈 MESSAGE TYPES IN MESSAGES TABLE:');
     const messageTypes = await client.query(`
       SELECT 
@@ -22,22 +64,9 @@ async function getDetailedStats() {
         COUNT(*) as count,
         MAX(timestamp) as latest_message
       FROM messages 
-      WHERE timestamp > NOW() - INTERVAL '1 hour'
       GROUP BY type 
       ORDER BY count DESC;
     `);
-    
-    const typeNames = {
-      1: 'CAST_ADD',
-      2: 'CAST_REMOVE', 
-      3: 'REACTION_ADD',
-      4: 'REACTION_REMOVE',
-      5: 'LINK_ADD',
-      6: 'LINK_REMOVE',
-      7: 'VERIFICATION_ADD_ETH_ADDRESS',
-      8: 'VERIFICATION_REMOVE',
-      11: 'USER_DATA_ADD'
-    };
     
     messageTypes.rows.forEach(row => {
       const typeName = typeNames[row.type] || `UNKNOWN_${row.type}`;
@@ -48,15 +77,17 @@ async function getDetailedStats() {
     
     // Custom table stats
     console.log('📋 CUSTOM TABLES:');
-    const tables = ['casts', 'reactions', 'links', 'message_stats'];
     
-    for (const table of tables) {
+    // Tables with deleted_at (soft deletable)
+    const softDeleteTables = ['casts', 'reactions', 'links'];
+    
+    for (const table of softDeleteTables) {
       try {
         const result = await client.query(`
           SELECT 
             COUNT(*) as total,
-            COUNT(*) FILTER (WHERE "deletedAt" IS NULL) as active,
-            MAX("createdAt") as latest
+            COUNT(*) FILTER (WHERE deleted_at IS NULL) as active,
+            MAX(created_at) as latest
           FROM ${table};
         `);
         
@@ -66,6 +97,42 @@ async function getDetailedStats() {
       } catch (error) {
         console.log(`  ${table}: ERROR - ${error.message}`);
       }
+    }
+    
+    // message_stats is different - it's just a log table, no soft deletes
+    try {
+      const statsResult = await client.query(`
+        SELECT 
+          COUNT(*) as total,
+          MAX(created_at) as latest
+        FROM message_stats;
+      `);
+      
+      const row = statsResult.rows[0];
+      console.log(`  message_stats: ${row.total} total (latest: ${row.latest})`);
+      
+      // Show message_stats breakdown
+      const breakdown = await client.query(`
+        SELECT 
+          message_type,
+          operation,
+          COUNT(*) as count
+        FROM message_stats 
+        GROUP BY message_type, operation 
+        ORDER BY count DESC 
+        LIMIT 5;
+      `);
+      
+      if (breakdown.rows.length > 0) {
+        console.log(`    📊 Top operations:`);
+        breakdown.rows.forEach(row => {
+          const typeName = typeNames[row.message_type] || `TYPE_${row.message_type}`;
+          console.log(`      ${typeName} ${row.operation}: ${row.count}`);
+        });
+      }
+      
+    } catch (error) {
+      console.log(`  message_stats: ERROR - ${error.message}`);
     }
     
     console.log('');
@@ -89,14 +156,14 @@ async function getDetailedStats() {
     
     console.log('');
     
-    // Processing rate (last hour)
-    console.log('⚡ PROCESSING RATE (last hour):');
+    // Processing rate (recent activity)
+    console.log('⚡ PROCESSING RATE (recent activity):');
     const rateQuery = await client.query(`
       SELECT 
         DATE_TRUNC('minute', timestamp) as minute,
         COUNT(*) as messages_per_minute
       FROM messages 
-      WHERE timestamp > NOW() - INTERVAL '1 hour'
+      WHERE timestamp > NOW() - INTERVAL '30 minutes'
       GROUP BY DATE_TRUNC('minute', timestamp)
       ORDER BY minute DESC
       LIMIT 10;

@@ -1,0 +1,4 @@
+docker run \
+  --net=bridge \
+  -e DATA_SOURCE_URI="postgres://shuttle:password@localhost:6541/shuttle" \
+  quay.io/prometheuscommunity/postgres-exporter
